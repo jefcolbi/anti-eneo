@@ -6,7 +6,7 @@ import re
 
 class AntiEneoBase:
     
-    rgx_commit_hash = re.compile('\[.*\b([0-9a-f]{5,40}).*\]')
+    rgx_commit_hash = re.compile(b'\[.*\b([0-9a-f]{5,40}).*\]')
     
     def __init__(self, *args, **kwargs):
         pass
