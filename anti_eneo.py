@@ -31,6 +31,7 @@ class AntiEneoBase:
         pass
     
     def poll(self):
+        
         res = self.commit()
         if res:
             self.push()
