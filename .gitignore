@@ -1,0 +1,5 @@
+*.pyc
+*.wpr
+*.wpu
+*__pyache__*
+.env
