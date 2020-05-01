@@ -18,7 +18,7 @@ class AntiEneoBase:
         print(output)
         print(res)
         if res:
-            return res.group(1)
+            return res.group(1).decode()
         
     
     def push(self):
