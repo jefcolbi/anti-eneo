@@ -16,6 +16,7 @@ class AntiEneoBase:
         output = subprocess.check_output(['git', 'commit', '-am', '"Anti eneo auto-save"'])
         res = self.rgx_commit_hash.search(output)
         print(output)
+        print(res)
         if res:
             return res.group(1)
         
