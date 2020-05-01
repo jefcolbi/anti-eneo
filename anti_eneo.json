@@ -1,0 +1,6 @@
+{
+    "mode":"watch",
+    "remote": "origin",
+    "branch": "auto_save",
+    "password_timeout": 60
+}
