@@ -60,6 +60,18 @@ class AntiEneoBase:
                 break
             except Exception as e:
                 raise ValueError("Unable to find the config file")
+            
+    def create_default_config(self):
+        """Create a default configuration in case one is not found"""
+        config = {
+            "mode":"poll",
+            "remote": "origin",
+            "branch": "auto_save",
+            "password_timeout": 3600*8,
+            "push_interval":600
+        }
+        with self.cur_dir.joinpath("anti_eneo.json").open("w") as fp:
+            json.dump(fp, config)
                     
     
     def activate_nopass(self):
