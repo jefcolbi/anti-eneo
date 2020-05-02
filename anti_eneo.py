@@ -3,11 +3,13 @@ import json
 from pathlib import Path
 import re
 import getpass
+import urllib
 
 
 class AntiEneoBase:
     
     rgx_commit_hash = re.compile(b'\[.* ([0-9a-f]+)\]')
+    rgx_git_provider = re.compile("//(.*)\.[a-zA-Z]{2,3}/")
     
     def __init__(self, *args, **kwargs):
         self.load_config()
@@ -62,30 +64,16 @@ class AntiEneoBase:
         except Exception as e:
             raise e
         print("current credentials", output)
-        if not output:
-            try:
-                output = subprocess.check_output(['git', 'config', 'credential.helper',
-                        "cache --timeout={}".format(self.password_timeout)])
-            except:
-                pass
+        res = self.rgx_git_provider.search(self.remote_url)
+        if res:
+            provider = res.group(1)
+            handler = getattr(self, 'handler_nopass_{}'.format(provider), None)
+            if handler is None:
+                raise NotImplementedError("No handler implemented for {} provider".format(provider))
             
-            username = input("Username: ")
-            password = getpass.getpass("Password: ")
-            
-            url = self.remote_url.replace("://", f"://{username}:{password}@")
-            
-            p = subprocess.Popen(['git', 'push', url], 
-                        stdout=subprocess.PIPE, stdin=subprocess.PIPE)
-            #line = p.stdout.readline()
-            #print(line)
-            #username = input(line.decode())
-            #p.stdout.write(username)
-            #line = p.stdout.readline()
-            #print(line)
-            #password = input(line.decode())
-            #p.stdout.write(password)
-            output = p.communicate()[0]
-            print(output)
+            handler()
+        else:
+            raise ValueError("Unable to find the git provider")
             
     def create_branch(self):
         """Create the saving branch if doesn't exist"""
@@ -101,6 +89,26 @@ class AntiEneoBase:
         res = re.search(b"%s\s+(.*) +" % self.remote.encode(), output)
         if res:
             return res.group(1).decode()
+        
+    def handler_nopass_github(self):
+        try:
+            output = subprocess.check_output(['git', 'config', 'credential.helper',
+                    "cache --timeout={}".format(self.password_timeout)])
+        except:
+            pass
+        
+        username = input("Username: ")
+        username = urllib.parse.quote(username)
+        password = getpass.getpass("Password: ")
+        password = urllib.parse.quote(password)
+        
+        url = self.remote_url.replace("://", f"://{username}:{password}@")
+        
+        p = subprocess.Popen(['git', 'push', url], 
+                    stdout=subprocess.PIPE, stdin=subprocess.PIPE)
+        
+        output = p.communicate()[0]
+        print(output)        
     
 if __name__ == "__main__":
     anti = AntiEneoBase()
