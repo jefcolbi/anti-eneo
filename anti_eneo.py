@@ -21,7 +21,10 @@ class AntiEneoBase:
     
     def commit(self):
         """Commit the current work"""
-        output = subprocess.check_output(['git', 'commit', '-am', '"Anti eneo auto-save"'])
+        try:
+            output = subprocess.check_output(['git', 'commit', '-am', '"Anti eneo auto-save"'])
+        except subprocess.CalledProcessError:
+            output = ''
         res = self.rgx_commit_hash.search(output)
         if res:
             return res.group(1).decode()        
