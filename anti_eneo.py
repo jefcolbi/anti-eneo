@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import getpass
 import urllib
+import time
 
 
 class AntiEneoBase:
@@ -33,10 +34,13 @@ class AntiEneoBase:
         pass
     
     def poll(self):
-        
-        res = self.commit()
-        if res:
-            self.push()
+        spent = 0
+        while spent < self.password_timeout:
+            time.sleep(self.push_interval)
+            res = self.commit()
+            if res:
+                self.push()
+            spent += self.push_interval
     
     def load_config(self):
         """Search and load the config"""
@@ -49,6 +53,7 @@ class AntiEneoBase:
                     self.remote = self.config['remote']
                     self.branch = self.config['branch']
                     self.password_timeout = self.config['password_timeout']
+                    self.push_interval = self.config['push_interval']
                 break
             except Exception as e:
                 raise ValueError("Unable to find the config file")
@@ -108,7 +113,7 @@ class AntiEneoBase:
                     stdout=subprocess.PIPE, stdin=subprocess.PIPE)
         
         output = p.communicate()[0]
-        print(output)        
+        return output 
     
 if __name__ == "__main__":
     anti = AntiEneoBase()
