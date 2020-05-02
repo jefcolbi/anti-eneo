@@ -5,6 +5,7 @@ import re
 import getpass
 import urllib
 import time
+import os
 
 
 class AntiEneoBase:
@@ -13,7 +14,13 @@ class AntiEneoBase:
     rgx_git_provider = re.compile("//(.*)\.[a-zA-Z]{2,3}/")
     
     def __init__(self, *args, **kwargs):
-        self.load_config()
+        try:
+            self.load_config()
+        except ValueError:
+            self.create_default_config()
+            print("A config was not found. I created a new one. Check and edit"
+                  " to your needs then relauch me")
+            
         self.remote_url = self.get_remote_url()
         print(self.remote_url)
         self.create_branch()
@@ -24,7 +31,7 @@ class AntiEneoBase:
         try:
             output = subprocess.check_output(['git', 'commit', '-am', '"Anti eneo auto-save"'])
         except subprocess.CalledProcessError:
-            output = ''
+            output = b''
         res = self.rgx_commit_hash.search(output)
         if res:
             return res.group(1).decode()        
