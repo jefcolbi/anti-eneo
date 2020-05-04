@@ -20,6 +20,7 @@ class AntiEneoBase:
             self.create_default_config()
             print("A config was not found. I created a new one. Check and edit"
                   " to your needs then relauch me")
+            os._exit(0)
             
         self.remote_url = self.get_remote_url()
         print(self.remote_url)
@@ -74,11 +75,11 @@ class AntiEneoBase:
             "mode":"poll",
             "remote": "origin",
             "branch": "auto_save",
-            "password_timeout": 3600*8,
-            "push_interval":600
+            "password_timeout": 3600*8, # 8h, a day of work, by default
+            "push_interval":600 # after 10min
         }
         with self.cur_dir.joinpath("anti_eneo.json").open("w") as fp:
-            json.dump(fp, config)
+            json.dump(config, fp, indent=4)
                     
     
     def activate_nopass(self):

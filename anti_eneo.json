@@ -1,7 +1,7 @@
 {
-    "mode":"watch",
+    "mode": "poll",
     "remote": "origin",
     "branch": "auto_save",
-    "password_timeout": 600,
-    "push_interval":120
+    "password_timeout": 28800,
+    "push_interval": 600
 }
