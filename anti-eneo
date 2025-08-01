@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# Default interval is 3 minutes (180 seconds)
+INTERVAL=180
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --interval=*)
+            INTERVAL="${1#*=}"
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: anti-eneo [--interval=X]"
+            echo "  --interval=X  Set the interval in seconds (default: 180)"
+            exit 1
+            ;;
+    esac
+done
+
+# Check if we're in a git repository
+if ! git rev-parse --git-dir > /dev/null 2>&1; then
+    echo "Error: Not in a git repository"
+    exit 1
+fi
+
+# Get current branch
+CURRENT_BRANCH=$(git branch --show-current)
+
+# If not on anti-eneo branch, create and checkout to it
+if [ "$CURRENT_BRANCH" != "anti-eneo" ]; then
+    echo "Creating and switching to anti-eneo branch..."
+    
+    # Check if anti-eneo branch exists
+    if git show-ref --verify --quiet refs/heads/anti-eneo; then
+        git checkout anti-eneo
+    else
+        git checkout -b anti-eneo
+    fi
+fi
+
+echo "Anti-Eneo started. Committing and pushing every $INTERVAL seconds..."
+echo "Press Ctrl+C to stop"
+
+# Main loop
+while true; do
+    sleep "$INTERVAL"
+    
+    echo "[$(date)] Checking for changes..."
+    
+    # Commit changes
+    git commit -am "periodic changes" 2>&1 | tee /tmp/anti-eneo-commit.log
+    
+    # Check if a commit was made
+    if grep -q "nothing to commit" /tmp/anti-eneo-commit.log; then
+        echo "[$(date)] No changes to commit"
+    else
+        echo "[$(date)] Pushing changes to anti-eneo branch..."
+        git push origin anti-eneo
+    fi
+done
