@@ -3,3 +3,6 @@
 *.wpu
 *__pyache__*
 .env
+.idea
+.vs
+.vscode

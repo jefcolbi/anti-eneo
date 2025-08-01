@@ -1,62 +1,127 @@
 #!/bin/bash
 
-# Default interval is 3 minutes (180 seconds)
-INTERVAL=180
 
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --interval=*)
-            INTERVAL="${1#*=}"
-            shift
-            ;;
-        *)
-            echo "Unknown option: $1"
-            echo "Usage: anti-eneo [--interval=X]"
-            echo "  --interval=X  Set the interval in seconds (default: 180)"
-            exit 1
-            ;;
-    esac
-done
+set -euo pipefail
 
-# Check if we're in a git repository
-if ! git rev-parse --git-dir > /dev/null 2>&1; then
-    echo "Error: Not in a git repository"
-    exit 1
-fi
+INTERVAL=180 # seconds
+BRANCH_NAME="anti-eneo"
+REMOTE_NAME="origin"
+COMMIT_MSG_TEMPLATE="Auto-save: %Y-%m-%d %H:%M:%S"
+QUIET=false
 
-# Get current branch
-CURRENT_BRANCH=$(git branch --show-current)
 
-# If not on anti-eneo branch, create and checkout to it
-if [ "$CURRENT_BRANCH" != "anti-eneo" ]; then
-    echo "Creating and switching to anti-eneo branch..."
-    
-    # Check if anti-eneo branch exists
-    if git show-ref --verify --quiet refs/heads/anti-eneo; then
-        git checkout anti-eneo
-    else
-        git checkout -b anti-eneo
-    fi
-fi
+log_info() {
+	if [[ "$QUIET" == "false" ]]; then
+		echo "[INFO] [$(date +'%H:%M:%S')] $1"
+	fi
+}
 
-echo "Anti-Eneo started. Committing and pushing every $INTERVAL seconds..."
-echo "Press Ctrl+C to stop"
+log_error() {
+	echo >&2 "[ERROR] [$(date +'%H:%M:%S')] $1"
+}
 
-# Main loop
-while true; do
-    sleep "$INTERVAL"
-    
-    echo "[$(date)] Checking for changes..."
-    
-    # Commit changes
-    git commit -am "periodic changes" 2>&1 | tee /tmp/anti-eneo-commit.log
-    
-    # Check if a commit was made
-    if grep -q "nothing to commit" /tmp/anti-eneo-commit.log; then
-        echo "[$(date)] No changes to commit"
-    else
-        echo "[$(date)] Pushing changes to anti-eneo branch..."
-        git push origin anti-eneo
-    fi
-done
+show_usage() {
+	echo "Usage: $0 [--interval=SECONDS] [--branch=NAME] [--remote=NAME] [--quiet]"
+	echo "  --interval=X  Commit interval in seconds (default: 180)"
+	echo "  --branch=X    Branch to use for auto-saves (default: anti-eneo)"
+	echo "  --remote=X    Remote to push to (default: origin)"
+	echo "  --quiet, -q   Suppress informational output"
+}
+
+
+check_dependencies() {
+	if ! command -v git &>/dev/null; then
+		log_error "git command not found. Please install Git."
+		exit 1
+	fi
+}
+
+setup_branch() {
+	log_info "Setting up branch '$BRANCH_NAME'..."
+
+	if ! git rev-parse --git-dir &>/dev/null; then
+		log_error "Not a git repository. Exiting."
+		exit 1
+	fi
+
+	if git rev-parse --verify --quiet "$BRANCH_NAME"; then
+		# Branch exists locally
+		git switch "$BRANCH_NAME"
+	elif git rev-parse --verify --quiet "$REMOTE_NAME/$BRANCH_NAME"; then
+		# Branch exists on remote but not locally
+		git switch --track "$REMOTE_NAME/$BRANCH_NAME"
+	else
+		# Branch does not exist. Create it
+		git switch -c "$BRANCH_NAME"
+	fi
+	log_info "Switched to branch '$BRANCH_NAME'."
+}
+
+commit_and_push() {
+	if [[ -z $(git status --porcelain) ]]; then
+		log_info "No changes to commit."
+		return 0
+	fi
+
+	log_info "Changes detected. Committing..."
+	local commit_msg
+	commit_msg=$(date +"$COMMIT_MSG_TEMPLATE")
+
+	git add .
+	git commit -m "$commit_msg" || true
+
+	log_info "Pushing changes to '$REMOTE_NAME/$BRANCH_NAME'..."
+	if git push --set-upstream "$REMOTE_NAME" "$BRANCH_NAME"; then
+		log_info "Push successful."
+	else
+		log_error "Push failed. Please check your connection and permissions."
+		return 1
+	fi
+}
+
+main() {
+	while [[ $# -gt 0 ]]; do
+		case $1 in
+		--interval=*)
+			INTERVAL="${1#*=}"
+			shift
+			;;
+		--branch=*)
+			BRANCH_NAME="${1#*=}"
+			shift
+			;;
+		--remote=*)
+			REMOTE_NAME="${1#*=}"
+			shift
+			;;
+		-q | --quiet)
+			QUIET=true
+			shift
+			;;
+		-h | --help)
+			show_usage
+			exit 0
+			;;
+		*)
+			log_error "Unknown option: $1"
+			show_usage
+			exit 1
+			;;
+		esac
+	done
+
+	check_dependencies
+	setup_branch
+
+	log_info "Anti-Eneo started. Committing every $INTERVAL seconds."
+	log_info "Press Ctrl+C to stop."
+
+	trap 'log_info "Anti-Eneo stopped by user."; exit 0' SIGINT
+
+	while true; do
+		sleep "$INTERVAL"
+		(commit_and_push)
+	done
+}
+
+main "$@"
