@@ -32,3 +32,8 @@ it waits for 1 min (debounce configurable with --debounce=X)) to see if another 
  - check the result of the commit command, if no commit was done do nothing
  - if a commit happened it will push to the `anti-eneo` branch
 
+
+# Installation
+
+
+
