@@ -3,7 +3,7 @@
 set -e
 
 REPO_URL="https://github.com/jefcolbi/anti-eneo"
-INSTALL_DIR="$HOME/.local/bin/anti-eneo"
+INSTALL_DIR="$HOME/.local/anti-eneo"
 BIN_DIR="$HOME/.local/bin"
 
 echo "Anti-ENEO Installer/Updater"
