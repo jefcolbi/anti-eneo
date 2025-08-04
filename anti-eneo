@@ -6,8 +6,10 @@ set -euo pipefail
 INTERVAL=180 # seconds
 BRANCH_NAME="anti-eneo"
 REMOTE_NAME="origin"
-COMMIT_MSG_TEMPLATE="Auto-save: %Y-%m-%d %H:%M:%S"
+COMMIT_MSG_TEMPLATE="periodic changes %Y-%m-%d %H:%M:%S"
 QUIET=false
+WATCH_MODE=false
+DEBOUNCE=60 # seconds for watch mode
 
 
 log_info() {
@@ -21,11 +23,14 @@ log_error() {
 }
 
 show_usage() {
-	echo "Usage: $0 [--interval=SECONDS] [--branch=NAME] [--remote=NAME] [--quiet]"
+	echo "Usage: $0 [--interval=SECONDS] [--branch=NAME] [--remote=NAME] [--quiet] [--watch [--debounce=SECONDS]] [--save-to=BRANCH]"
 	echo "  --interval=X  Commit interval in seconds (default: 180)"
 	echo "  --branch=X    Branch to use for auto-saves (default: anti-eneo)"
 	echo "  --remote=X    Remote to push to (default: origin)"
 	echo "  --quiet, -q   Suppress informational output"
+	echo "  --watch       Enable watch mode to monitor file changes"
+	echo "  --debounce=X  Debounce time in seconds for watch mode (default: 60)"
+	echo "  --save-to=X   Save all changes from anti-eneo to target branch and exit"
 }
 
 
@@ -36,12 +41,28 @@ check_dependencies() {
 	fi
 }
 
+count_commits() {
+	local base_branch="main"
+	if git rev-parse --verify --quiet "$base_branch" &>/dev/null; then
+		git rev-list --count "HEAD" "^$(git merge-base HEAD "$base_branch" 2>/dev/null || echo '')" 2>/dev/null || echo "0"
+	else
+		git rev-list --count HEAD 2>/dev/null || echo "0"
+	fi
+}
+
 setup_branch() {
 	log_info "Setting up branch '$BRANCH_NAME'..."
 
 	if ! git rev-parse --git-dir &>/dev/null; then
 		log_error "Not a git repository. Exiting."
 		exit 1
+	fi
+	
+	local current_branch
+	current_branch=$(git branch --show-current)
+	if [[ "$current_branch" == "$BRANCH_NAME" ]]; then
+		log_info "Already on branch '$BRANCH_NAME'."
+		return 0
 	fi
 
 	if git rev-parse --verify --quiet "$BRANCH_NAME"; then
@@ -68,20 +89,216 @@ commit_and_push() {
 	commit_msg=$(date +"$COMMIT_MSG_TEMPLATE")
 
 	git add .
-	git commit -m "$commit_msg" || true
-
-	log_info "Pushing changes to '$REMOTE_NAME/$BRANCH_NAME'..."
-	if git push --set-upstream "$REMOTE_NAME" "$BRANCH_NAME"; then
-		log_info "Push successful."
+	if git commit -m "$commit_msg"; then
+		log_info "Changes committed."
+		
+		local commit_count
+		commit_count=$(count_commits)
+		log_info "Current commit count on branch: $commit_count"
+		
+		if [[ "$commit_count" -gt 2 ]]; then
+			log_info "Rolling window: removing oldest commit"
+			if git reset --hard HEAD~1; then
+				log_info "Oldest commit removed."
+				
+				log_info "Force pushing with lease to '$REMOTE_NAME/$BRANCH_NAME'..."
+				if git push --force-with-lease "$REMOTE_NAME" "$BRANCH_NAME"; then
+					log_info "Force push successful."
+				else
+					log_error "Force push failed. Someone else may have pushed to the branch."
+					return 1
+				fi
+			else
+				log_error "Failed to reset commit."
+				return 1
+			fi
+		else
+			log_info "Pushing changes to '$REMOTE_NAME/$BRANCH_NAME'..."
+			if git push --set-upstream "$REMOTE_NAME" "$BRANCH_NAME"; then
+				log_info "Push successful."
+			else
+				log_error "Push failed. Please check your connection and permissions."
+				return 1
+			fi
+		fi
 	else
-		log_error "Push failed. Please check your connection and permissions."
+		log_info "No changes were committed."
+	fi
+}
+
+graceful_shutdown() {
+	log_info "Shutting down Anti-Eneo..."
+	
+	# Check for pending changes
+	if [[ -n $(git status --porcelain) ]]; then
+		log_info "Pending changes detected. Committing before shutdown..."
+		commit_and_push
+	else
+		log_info "No pending changes to commit."
+	fi
+	
+	# Clean up any temporary files
+	if [[ -n "${LAST_CHANGE_FILE:-}" ]] && [[ -f "$LAST_CHANGE_FILE" ]]; then
+		rm -f "$LAST_CHANGE_FILE"
+	fi
+	
+	log_info "Anti-Eneo stopped gracefully."
+	exit 0
+}
+
+save_to_branch() {
+	local target_branch="$1"
+	
+	# Validation checks
+	if [[ -z "$target_branch" ]]; then
+		log_error "Please specify target branch: --save-to=main"
+		exit 1
+	fi
+	
+	# Check if target branch exists
+	if ! git show-ref --verify --quiet "refs/heads/$target_branch"; then
+		log_error "Branch '$target_branch' does not exist"
+		exit 1
+	fi
+	
+	# Check if there are changes to save
+	local merge_base
+	merge_base=$(git merge-base HEAD "$target_branch" 2>/dev/null)
+	if [[ -z "$merge_base" ]] || git diff --quiet "$merge_base" HEAD; then
+		log_info "No changes to save to $target_branch"
+		return 0
+	fi
+	
+	log_info "Preparing to save all $BRANCH_NAME changes to $target_branch..."
+	
+	# Switch to target branch
+	git checkout "$target_branch"
+	
+	# Pull latest changes
+	log_info "Updating $target_branch..."
+	if ! git pull "$REMOTE_NAME" "$target_branch" 2>/dev/null; then
+		log_info "Warning: Could not pull latest changes"
+	fi
+	
+	# Squash merge all changes from anti-eneo
+	log_info "Merging changes..."
+	if ! git merge --squash "$BRANCH_NAME"; then
+		log_error "Merge conflicts detected. Please resolve manually:"
+		echo "  1. Fix conflicts in your editor"
+		echo "  2. git add ."
+		echo "  3. git commit -m 'Your message'"
+		echo "  4. git push $REMOTE_NAME $target_branch"
+		echo "  5. git checkout $BRANCH_NAME"
 		return 1
 	fi
+	
+	# Check if there are staged changes
+	if git diff --cached --quiet; then
+		log_info "No new changes to commit to $target_branch"
+		git checkout "$BRANCH_NAME"
+		return 0
+	fi
+	
+	# Prompt for commit message
+	echo ""
+	log_info "Changes staged successfully!"
+	echo "Enter your commit message:"
+	read -r commit_msg
+	
+	# Validate commit message
+	if [[ -z "$commit_msg" ]]; then
+		log_error "Commit message cannot be empty"
+		echo "Changes are staged. You can commit manually with:"
+		echo "  git commit -m 'Your message'"
+		git checkout "$BRANCH_NAME"
+		return 1
+	fi
+	
+	# Commit and push
+	if git commit -m "$commit_msg"; then
+		log_info "Committed successfully. Pushing to $REMOTE_NAME..."
+		if git push "$REMOTE_NAME" "$target_branch"; then
+			log_info "✅ Changes saved to $target_branch and pushed successfully!"
+		else
+			log_info "⚠️  Committed locally but push failed. You may need to push manually."
+		fi
+	else
+		log_error "Commit failed"
+		git checkout "$BRANCH_NAME"
+		return 1
+	fi
+	
+	# Return to anti-eneo branch
+	git checkout "$BRANCH_NAME"
+	log_info "Returned to $BRANCH_NAME branch"
+}
+
+handle_file_change() {
+	log_info "File change detected"
+	date +%s > "$LAST_CHANGE_FILE"
+}
+
+run_watch_mode() {
+	log_info "Anti-Eneo Watch started. Watching for file changes..."
+	log_info "Debounce time: $DEBOUNCE seconds"
+	log_info "Press Ctrl+C to stop"
+
+	LAST_CHANGE_FILE="/tmp/anti-eneo-last-change-$$"
+	touch "$LAST_CHANGE_FILE"
+
+	trap 'graceful_shutdown' SIGINT SIGTERM
+
+	while true; do
+		if ! git diff --quiet || ! git diff --cached --quiet; then
+			handle_file_change
+			
+			sleep "$DEBOUNCE"
+			
+			local LAST_CHANGE
+			LAST_CHANGE=$(cat "$LAST_CHANGE_FILE" 2>/dev/null || echo 0)
+			local CURRENT_TIME
+			CURRENT_TIME=$(date +%s)
+			local TIME_DIFF
+			TIME_DIFF=$((CURRENT_TIME - LAST_CHANGE))
+			
+			if [[ "$TIME_DIFF" -ge "$DEBOUNCE" ]]; then
+				(commit_and_push)
+			fi
+		fi
+		
+		sleep 1
+	done
+}
+
+run_interval_mode() {
+	log_info "Anti-Eneo started. Committing every $INTERVAL seconds."
+	log_info "Press Ctrl+C to stop."
+
+	trap 'graceful_shutdown' SIGINT SIGTERM
+
+	while true; do
+		sleep "$INTERVAL"
+		(commit_and_push)
+	done
 }
 
 main() {
 	while [[ $# -gt 0 ]]; do
 		case $1 in
+		--save-to=*)
+			check_dependencies
+			target_branch="${1#*=}"
+			
+			# Validate we're on the correct branch BEFORE setup
+			current_branch=$(git branch --show-current)
+			if [[ "$current_branch" != "$BRANCH_NAME" ]]; then
+				log_error "Must be on $BRANCH_NAME branch to use --save-to"
+				exit 1
+			fi
+			
+			save_to_branch "$target_branch"
+			exit $?
+			;;
 		--interval=*)
 			INTERVAL="${1#*=}"
 			shift
@@ -96,6 +313,14 @@ main() {
 			;;
 		-q | --quiet)
 			QUIET=true
+			shift
+			;;
+		--watch)
+			WATCH_MODE=true
+			shift
+			;;
+		--debounce=*)
+			DEBOUNCE="${1#*=}"
 			shift
 			;;
 		-h | --help)
@@ -113,15 +338,11 @@ main() {
 	check_dependencies
 	setup_branch
 
-	log_info "Anti-Eneo started. Committing every $INTERVAL seconds."
-	log_info "Press Ctrl+C to stop."
-
-	trap 'log_info "Anti-Eneo stopped by user."; exit 0' SIGINT
-
-	while true; do
-		sleep "$INTERVAL"
-		(commit_and_push)
-	done
+	if [[ "$WATCH_MODE" == "true" ]]; then
+		run_watch_mode
+	else
+		run_interval_mode
+	fi
 }
 
 main "$@"
