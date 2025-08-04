@@ -31,7 +31,6 @@ chmod +x "$INSTALL_DIR/anti-eneo-watch"
 
 echo "Creating symlinks..."
 ln -sf "$INSTALL_DIR/anti-eneo" "$BIN_DIR/anti-eneo"
-ln -sf "$INSTALL_DIR/anti-eneo-watch" "$BIN_DIR/anti-eneo-watch"
 
 add_to_path() {
     local shell_config="$1"
@@ -106,6 +105,5 @@ echo "✓ Installation/Update complete!"
 echo
 echo "Available commands:"
 echo "  anti-eneo       - Main anti-eneo command"
-echo "  anti-eneo-watch - Watch mode for anti-eneo"
 echo
 echo "To update in the future, run this installer again."
